@@ -240,3 +240,7 @@ level_latency.json
 *.swp
 .DS_Store
 Thumbs.db
+
+# 可执行文件和分发打包文件
+dl_click_assist.exe
+*.zip
