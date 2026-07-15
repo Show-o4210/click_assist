@@ -5,7 +5,12 @@ from pathlib import Path
 import sys
 
 PACKAGE_DIR = Path(__file__).resolve().parent
-ROOT_DIR = PACKAGE_DIR.parent  # click_assist/
+
+if getattr(sys, 'frozen', False):
+    ROOT_DIR = Path(sys.executable).resolve().parent
+else:
+    ROOT_DIR = PACKAGE_DIR.parent  # click_assist/
+
 GAME_DIR = ROOT_DIR.parent  # Dancing Line/
 
 # 寻找同目录下的 preload_assets_levelclicktimes.bundle

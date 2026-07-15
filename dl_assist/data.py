@@ -56,7 +56,19 @@ def parse_times_text(text: str) -> list[float]:
 
 
 def load_times_from_bundle(bundle_path: Path) -> dict[str, list[float]]:
-    import UnityPy
+    try:
+        import UnityPy
+    except ImportError:
+        if CACHE_PATH.is_file():
+            try:
+                with CACHE_PATH.open("r", encoding="utf-8") as f:
+                    raw = json.load(f)
+                return {k: [float(x) for x in v] for k, v in raw.items()}
+            except Exception:
+                pass
+        raise ImportError(
+            "未安装 UnityPy，且无法加载缓存。若要直接解析 Unity Bundle，请安装 UnityPy: pip install UnityPy"
+        )
 
     if not bundle_path.is_file():
         raise FileNotFoundError(f"找不到 bundle: {bundle_path}")
@@ -227,9 +239,18 @@ def load_or_build_cache(
 
 
 def _load_official(bundle_path: Path, force: bool = False) -> dict[str, list[float]]:
-    if not force and CACHE_PATH.is_file() and bundle_path.is_file():
+    if not force and CACHE_PATH.is_file():
         try:
-            if CACHE_PATH.stat().st_mtime >= bundle_path.stat().st_mtime:
+            need_rebuild = False
+            if bundle_path.is_file():
+                try:
+                    import UnityPy
+                    if CACHE_PATH.stat().st_mtime < bundle_path.stat().st_mtime:
+                        need_rebuild = True
+                except ImportError:
+                    pass
+            
+            if not need_rebuild:
                 with CACHE_PATH.open("r", encoding="utf-8") as f:
                     raw = json.load(f)
                 # 兼容旧缓存：确保是完整 list

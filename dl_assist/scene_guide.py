@@ -130,7 +130,10 @@ def extract_hint_tap_times(scene_path: Path) -> list[float]:
     判定：含 triggerTime，且含 triggerTapDistance 或 triggerGreatDevTime
     （对应 GoodTapSprite / NormalTapSprite 引导点）。
     """
-    import UnityPy
+    try:
+        import UnityPy
+    except ImportError:
+        return []
 
     env = UnityPy.load(str(scene_path))
     times: list[float] = []
