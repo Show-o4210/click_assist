@@ -216,3 +216,27 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.env
+
+# 运行缓存 / 用户数据（本地生成，勿提交个人调参）
+level_click_times_cache.json
+level_scene_guide_cache.json
+level_overrides.json
+level_segment_latency.json
+level_latency.json
+
+# 可选：官方导出体积大，可按需提交
+# tables_official/
+
+# IDE / OS
+.idea/
+.vscode/
+*.swp
+.DS_Store
+Thumbs.db
