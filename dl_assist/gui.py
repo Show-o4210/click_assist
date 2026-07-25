@@ -11,6 +11,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QListWidget,
     QMainWindow,
+    QMessageBox,
     QPushButton,
     QVBoxLayout,
     QWidget,
@@ -26,6 +27,8 @@ from .level_names import combo_level_key, display_name, fill_level_combo, zh_nam
 from .note_editor import NoteEditorDialog
 from .theme import APP_QSS
 from .widgets import TimelineWidget, UiBridge
+
+HOTKEY_NUDGE_MS = 5.0
 
 
 def _btn(text: str, accent: str) -> QPushButton:
@@ -55,8 +58,8 @@ class AssistApp(QMainWindow):
         )
 
         self.setWindowTitle("跳舞的线 · 点击辅助")
-        self.setMinimumSize(720, 520)
-        self.resize(820, 600)
+        self.setMinimumSize(620, 390)
+        self.resize(720, 460)
         self.setWindowFlags(self.windowFlags() | Qt.WindowType.WindowStaysOnTopHint)
 
         self.clicker = Clicker(
@@ -85,7 +88,7 @@ class AssistApp(QMainWindow):
         root.setContentsMargins(10, 10, 10, 10)
         root.setSpacing(6)
 
-        # row: level + latency + buttons
+        # 顶部只保留选关与帮助，减少首次使用时的干扰。
         bar = QHBoxLayout()
         bar.setSpacing(8)
 
@@ -96,35 +99,6 @@ class AssistApp(QMainWindow):
         fill_level_combo(self.level_combo, list(self.levels.keys()), level)
         self.level_combo.currentIndexChanged.connect(lambda _i: self._reload())
         bar.addWidget(self.level_combo)
-
-        bar.addWidget(self._muted("延迟 ms"))
-        self.lat_spin = QDoubleSpinBox()
-        self.lat_spin.setRange(-200.0, 200.0)
-        self.lat_spin.setDecimals(1)
-        self.lat_spin.setSingleStep(1.0)
-        self.lat_spin.setValue(float(latency))
-        self.lat_spin.setSuffix(" ms")
-        self.lat_spin.setFixedWidth(110)
-        self.lat_spin.setToolTip("正数=更晚（治抢拍），负数=更早")
-        self.lat_spin.valueChanged.connect(self._on_latency)
-        bar.addWidget(self.lat_spin)
-
-        self.btn_play = _btn("F8 播放/暂停", "green")
-        self.btn_play.clicked.connect(self.engine.toggle_play)
-        self.btn_reset = _btn("F6 重置", "red")
-        self.btn_reset.clicked.connect(self.engine.reset)
-        self.btn_edit = _btn("编辑表", "orange")
-        self.btn_edit.clicked.connect(self._open_editor)
-        self.btn_fail = _btn("失败微调", "blue")
-        self.btn_fail.setToolTip(
-            "按失败进度 % 加「段落延迟」（不改表，推荐）；"
-            "段内等量平移、段外不动，避免拖歪原本准的拍"
-        )
-        self.btn_fail.clicked.connect(self._open_fail_tune)
-        bar.addWidget(self.btn_play)
-        bar.addWidget(self.btn_reset)
-        bar.addWidget(self.btn_edit)
-        bar.addWidget(self.btn_fail)
         bar.addStretch(1)
 
         self.table_info = QLabel("")
@@ -132,10 +106,13 @@ class AssistApp(QMainWindow):
             f"color: {T.GREEN}; font-family: Consolas; font-size: 11px; font-weight: 700;"
         )
         bar.addWidget(self.table_info)
+        self.btn_help = QPushButton("使用说明")
+        self.btn_help.clicked.connect(self._show_help)
+        bar.addWidget(self.btn_help)
         root.addLayout(bar)
 
         self.status_label = QLabel("待命")
-        self.status_label.setStyleSheet("font-weight: 700; font-size: 13px;")
+        self.status_label.setStyleSheet("font-weight: 700; font-size: 15px;")
         root.addWidget(self.status_label)
 
         self.meta_label = QLabel("")
@@ -150,29 +127,54 @@ class AssistApp(QMainWindow):
         )
         root.addWidget(self.countdown_label)
 
-        self.cv_full = TimelineWidget(full=True, interactive=False)
-        self.cv_full.setFixedHeight(64)
-        root.addWidget(self.cv_full)
-
         self.cv_zoom = TimelineWidget(full=False, interactive=False, zoom_half=2.5)
-        self.cv_zoom.setFixedHeight(76)
+        self.cv_zoom.setFixedHeight(90)
         root.addWidget(self.cv_zoom)
 
-        lists = QHBoxLayout()
-        left = QVBoxLayout()
-        left.addWidget(self._muted("时间表"))
-        self.list_sched = QListWidget()
-        self.list_sched.setUniformItemSizes(True)
-        left.addWidget(self.list_sched)
-        lists.addLayout(left, 1)
+        controls = QHBoxLayout()
+        controls.addWidget(self._muted("点击延迟"))
+        self.lat_spin = QDoubleSpinBox()
+        self.lat_spin.setRange(-200.0, 200.0)
+        self.lat_spin.setDecimals(1)
+        self.lat_spin.setSingleStep(1.0)
+        self.lat_spin.setValue(float(latency))
+        self.lat_spin.setSuffix(" ms")
+        self.lat_spin.setFixedWidth(110)
+        self.lat_spin.setToolTip("正数=更晚（治抢拍），负数=更早")
+        self.lat_spin.valueChanged.connect(self._on_latency)
+        controls.addWidget(self.lat_spin)
+        self.btn_play = _btn("F8  开始 / 暂停", "green")
+        self.btn_play.clicked.connect(self.engine.toggle_play)
+        self.btn_reset = QPushButton("F6  重置")
+        self.btn_reset.clicked.connect(self.engine.reset)
+        controls.addWidget(self.btn_play)
+        controls.addWidget(self.btn_reset)
+        controls.addStretch(1)
+        root.addLayout(controls)
 
-        right = QVBoxLayout()
-        right.addWidget(self._muted("日志"))
+        hotkey_hint = self._muted("运行中：F7 提前 5ms    F9 延迟 5ms")
+        root.addWidget(hotkey_hint)
+
+        root.addWidget(self._muted("最近点击"))
         self.list_log = QListWidget()
         self.list_log.setUniformItemSizes(True)
-        right.addWidget(self.list_log)
-        lists.addLayout(right, 1)
-        root.addLayout(lists, 1)
+        self.list_log.setFixedHeight(82)
+        root.addWidget(self.list_log)
+
+        advanced = QHBoxLayout()
+        advanced.addWidget(self._muted("高级工具"))
+        self.btn_fail = QPushButton("失败微调")
+        self.btn_fail.setToolTip(
+            "按失败进度 % 加「段落延迟」（不改表，推荐）；"
+            "段内等量平移、段外不动"
+        )
+        self.btn_fail.clicked.connect(self._open_fail_tune)
+        self.btn_edit = QPushButton("编辑点击表")
+        self.btn_edit.clicked.connect(self._open_editor)
+        advanced.addWidget(self.btn_fail)
+        advanced.addWidget(self.btn_edit)
+        advanced.addStretch(1)
+        root.addLayout(advanced)
 
     @staticmethod
     def _muted(text: str) -> QLabel:
@@ -185,6 +187,27 @@ class AssistApp(QMainWindow):
 
     def _latency_ms(self) -> float:
         return float(self.lat_spin.value())
+
+    def _nudge_latency(self, delta_ms: float) -> None:
+        """实时平移下一拍及后续点击，并同步主界面的延迟值。"""
+        value = self.lat_spin.value() + float(delta_ms)
+        self.lat_spin.setValue(value)
+
+    def _show_help(self) -> None:
+        QMessageBox.information(
+            self,
+            "简单使用说明",
+            "1. 在游戏中进入关卡的准备界面。\n"
+            "2. 在本软件顶部选择对应关卡。\n"
+            "3. 按 F8，软件会自动按 Enter 开局并跟随时间表点击。\n\n"
+            "快捷键\n"
+            "F8：开始 / 暂停 / 继续\n"
+            "F6：停止并重置\n"
+            "F7：下一拍及后续点击提前 5ms\n"
+            "F9：下一拍及后续点击延迟 5ms\n\n"
+            "如果画面整体抢拍，请按 F9；如果整体偏晚，请按 F7。\n"
+            "调整会立即生效，并同步显示在“点击延迟”中。",
+        )
 
     def _current_level(self) -> str:
         return combo_level_key(self.level_combo)
@@ -263,19 +286,9 @@ class AssistApp(QMainWindow):
         )
         snap = self.engine.snapshot()
         sched = snap["schedule"]
-        self.list_sched.clear()
-        if sched:
-            t0 = sched[0]
-            self.list_sched.addItems(
-                [
-                    f"#{i + 1:4d}  {t:10.4f}s  +{t - t0:8.4f}"
-                    for i, t in enumerate(sched)
-                ]
-            )
 
         src = LAST_LEVEL_SOURCES.get(name, "?")
         src_label = {
-            "guide": "引导",
             "official": "官方",
             "override": "覆盖",
         }.get(src, src)
@@ -303,8 +316,12 @@ class AssistApp(QMainWindow):
         mode = self.hotkeys.start(
             on_toggle=ui(self.engine.toggle_play),
             on_reset=ui(self.engine.reset),
+            on_earlier=ui(lambda: self._nudge_latency(-HOTKEY_NUDGE_MS)),
+            on_later=ui(lambda: self._nudge_latency(HOTKEY_NUDGE_MS)),
         )
-        self.status_label.setText(f"待命 · 热键[{mode}] F8/F6")
+        self.status_label.setText(
+            f"待命 · 热键[{mode}] F8播放 F6重置 F7提前 F9延迟"
+        )
 
     def _draw(self) -> None:
         snap = self.engine.snapshot()
@@ -345,9 +362,6 @@ class AssistApp(QMainWindow):
             else:
                 self.countdown_label.setText("NEXT — done")
 
-        self.cv_full.set_data(
-            sched, playhead=go, next_index=ni, flash=bool(snap["flash"])
-        )
         self.cv_zoom.set_data(
             sched, playhead=go, next_index=ni, flash=bool(snap["flash"])
         )
@@ -359,11 +373,6 @@ class AssistApp(QMainWindow):
                     f"#{ev.index + 1:3d}  {ev.official_t:7.3f}s  "
                     f"err={ev.err_ms:+6.1f}ms"
                 )
-            if n and 0 <= ni < n:
-                self.list_sched.setCurrentRow(ni)
-                item = self.list_sched.item(ni)
-                if item:
-                    self.list_sched.scrollToItem(item)
             self._dirty = False
 
     def closeEvent(self, event) -> None:  # noqa: N802

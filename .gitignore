@@ -225,6 +225,7 @@ venv/
 .env
 
 # 运行缓存 / 用户数据（本地生成，勿提交个人调参）
+# 旧版本可能遗留的缓存（当前版本不再读取）
 level_click_times_cache.json
 level_scene_guide_cache.json
 level_overrides.json

@@ -9,9 +9,6 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass
 
-from .data import try_audio_length_seconds
-
-
 @dataclass(frozen=True)
 class DurationEstimate:
     seconds: float
@@ -43,17 +40,9 @@ def estimate_level_duration_s(
     """
     估算「100% 进度」对应的秒数。
 
-    优先音频时长（更接近真实关卡长度）；否则用点击表末点。
-    百分比本就不精确，这里只求一个稳定的映射基准。
+    使用点击表末点估算。百分比本就不精确，这里只求稳定映射。
     """
     table_end = float(times[-1]) if times else 0.0
-    if prefer_audio:
-        audio = try_audio_length_seconds(level)
-        if audio is not None and audio > 5.0:
-            # 表比音频长时（尾奏后点），仍取较大值，避免 100% 落在表外
-            if table_end > audio + 2.0:
-                return DurationEstimate(table_end, "table(>audio)")
-            return DurationEstimate(float(audio), "audio")
     if table_end > 1.0:
         return DurationEstimate(table_end, "table")
     return DurationEstimate(60.0, "default")

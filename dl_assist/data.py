@@ -5,12 +5,8 @@ import re
 from pathlib import Path
 
 from .paths import (
-    CACHE_PATH,
-    DEFAULT_BUNDLE,
     LEVEL_LATENCY_PATH,
     OVERRIDES_JSON,
-    ROOT_DIR,
-    SOUNDS_DIR,
     TABLES_OFFICIAL_DIR,
     TABLES_OVERRIDE_DIR,
 )
@@ -55,54 +51,6 @@ def parse_times_text(text: str) -> list[float]:
     return times
 
 
-def load_times_from_bundle(bundle_path: Path) -> dict[str, list[float]]:
-    try:
-        import UnityPy
-    except ImportError:
-        if CACHE_PATH.is_file():
-            try:
-                with CACHE_PATH.open("r", encoding="utf-8") as f:
-                    raw = json.load(f)
-                return {k: [float(x) for x in v] for k, v in raw.items()}
-            except Exception:
-                pass
-        raise ImportError(
-            "未安装 UnityPy，且无法加载缓存。若要直接解析 Unity Bundle，请安装 UnityPy: pip install UnityPy"
-        )
-
-    if not bundle_path.is_file():
-        raise FileNotFoundError(f"找不到 bundle: {bundle_path}")
-
-    env = UnityPy.load(str(bundle_path))
-    levels: dict[str, list[float]] = {}
-    for obj in env.objects:
-        # 只读 TextAsset；跳过 AssetBundle 容器等
-        type_name = getattr(obj.type, "name", None) or str(obj.type)
-        if type_name != "TextAsset":
-            continue
-        data = obj.read()
-        name = getattr(data, "m_Name", None) or getattr(data, "name", None) or ""
-        if not name:
-            continue
-
-        script = getattr(data, "m_Script", None)
-        if script is None:
-            script = getattr(data, "script", None)
-        if script is None:
-            continue
-
-        if isinstance(script, bytes):
-            text = script.decode("utf-8", errors="replace")
-        else:
-            text = str(script)
-
-        times = parse_times_text(text)
-        if times:
-            levels[name] = times
-
-    return dict(sorted(levels.items(), key=lambda kv: kv[0].lower()))
-
-
 def load_times_from_txt_dir(directory: Path) -> dict[str, list[float]]:
     """从目录加载 *.txt，文件名（无后缀）= 关卡名。"""
     if not directory.is_dir():
@@ -141,78 +89,26 @@ def merge_levels(
     )
 
 
-# 最近一次 load_or_build_cache 的数据来源：official | guide | override
+# 最近一次加载的数据来源：official | override
 LAST_LEVEL_SOURCES: dict[str, str] = {}
 
 
 def load_or_build_cache(
-    bundle_path: Path | None = None,
-    force: bool = False,
     apply_override: bool = True,
-    use_scene_guide: bool = True,
-    force_scene_guide: bool = False,
     *,
     quiet: bool = False,
     update_sources: bool = True,
 ) -> dict[str, list[float]]:
     """
     加载点击表，优先级：
-      level_overrides.json / tables/*.txt > 场景引导 HintTap > LevelClickTimes
+      level_overrides.json / tables/*.txt > 内置 tables_official/*.txt
 
     quiet: 不打印进度
     update_sources: 是否写入全局 LAST_LEVEL_SOURCES
     """
-    bundle_path = bundle_path or DEFAULT_BUNDLE
-    official = _load_official(bundle_path, force=force)
+    official = _load_official()
     sources: dict[str, str] = {k: "official" for k in official}
     base = dict(official)
-
-    if use_scene_guide:
-        try:
-            from .scene_guide import (
-                load_or_build_scene_guide_cache,
-                prefer_guide_times,
-            )
-
-            guide_cache = ROOT_DIR / "level_scene_guide_cache.json"
-            guide = load_or_build_scene_guide_cache(
-                force=force or force_scene_guide,
-                progress=(
-                    not quiet
-                    and (
-                        force
-                        or force_scene_guide
-                        or not guide_cache.is_file()
-                    )
-                ),
-            )
-            n_guide = 0
-            n_richer = 0
-            for name, otimes in list(base.items()):
-                gtimes = guide.get(name)
-                chosen, src = prefer_guide_times(otimes, gtimes)
-                if src == "guide":
-                    n_guide += 1
-                    if gtimes and (
-                        len(gtimes) > len(otimes)
-                        or (gtimes and otimes and gtimes[-1] > otimes[-1] + 0.5)
-                    ):
-                        n_richer += 1
-                base[name] = chosen
-                sources[name] = src
-            for name, gtimes in guide.items():
-                if name not in base and gtimes:
-                    base[name] = list(gtimes)
-                    sources[name] = "guide"
-                    n_guide += 1
-            if not quiet:
-                print(
-                    f"[*] 场景引导 HintTap：采用 {n_guide} 关"
-                    f"（其中明显更完整 {n_richer} 关）"
-                )
-        except Exception as e:
-            if not quiet:
-                print(f"[!] 场景引导加载失败，回退官方表: {e}")
 
     if apply_override:
         # JSON 优先，再合并旧 tables/*.txt（同名以 JSON 为准）
@@ -238,88 +134,24 @@ def load_or_build_cache(
     return dict(sorted(base.items(), key=lambda kv: kv[0].lower()))
 
 
-def _load_official(bundle_path: Path, force: bool = False) -> dict[str, list[float]]:
-    if not force and CACHE_PATH.is_file():
-        try:
-            need_rebuild = False
-            if bundle_path.is_file():
-                try:
-                    import UnityPy
-                    if CACHE_PATH.stat().st_mtime < bundle_path.stat().st_mtime:
-                        need_rebuild = True
-                except ImportError:
-                    pass
-            
-            if not need_rebuild:
-                with CACHE_PATH.open("r", encoding="utf-8") as f:
-                    raw = json.load(f)
-                # 兼容旧缓存：确保是完整 list
-                return {k: [float(x) for x in v] for k, v in raw.items()}
-        except (OSError, json.JSONDecodeError, TypeError, ValueError):
-            pass
-
-    print(f"[*] 解析 bundle: {bundle_path}")
-    levels = load_times_from_bundle(bundle_path)
-    with CACHE_PATH.open("w", encoding="utf-8") as f:
-        # 不缩写、不截断
-        json.dump(levels, f, indent=2, ensure_ascii=False)
-    print(f"[*] 缓存 {len(levels)} 关 -> {CACHE_PATH.name}")
-    return levels
+def _load_official() -> dict[str, list[float]]:
+    """读取随软件分发的官方点击表，不访问游戏安装目录。"""
+    fresh = load_times_from_txt_dir(TABLES_OFFICIAL_DIR)
+    if not fresh:
+        raise FileNotFoundError(f"找不到内置点击表: {TABLES_OFFICIAL_DIR}")
+    return fresh
 
 
-def export_official_tables(
-    levels: dict[str, list[float]] | None = None,
-    out_dir: Path | None = None,
-    bundle_path: Path | None = None,
-) -> Path:
-    """导出每关完整点击表到 txt，便于核对「有没有被截断」。"""
-    out_dir = out_dir or TABLES_OFFICIAL_DIR
-    out_dir.mkdir(parents=True, exist_ok=True)
-    if levels is None:
-        levels = _load_official(bundle_path or DEFAULT_BUNDLE, force=True)
-
-    stats_lines = [
-        "# level,count,first,last,source",
-    ]
-    for name, times in levels.items():
-        path = out_dir / f"{name}.txt"
-        body = "\n".join(_fmt_time(t) for t in times)
-        # 始终换行结尾，与官方一致
-        path.write_text(body + "\n", encoding="utf-8")
-        stats_lines.append(
-            f"{name},{len(times)},{times[0]:.6f},{times[-1]:.6f},official"
-        )
-
-    (out_dir / "_stats.csv").write_text("\n".join(stats_lines) + "\n", encoding="utf-8")
-    (out_dir / "README.txt").write_text(
-        "官方 LevelClickTimes 完整导出（脚本无条数上限）。\n"
-        "若要改某一关：复制到 ../tables/同名.txt 后重启工具，将整关覆盖官方表。\n"
-        "格式：每行一个秒数（从关卡时间轴 0 起的绝对时间）。\n",
-        encoding="utf-8",
-    )
-    return out_dir
-
-
-def _fmt_time(t: float) -> str:
-    # 保留足够精度，去掉多余 0
-    s = f"{t:.6f}".rstrip("0").rstrip(".")
-    return s if s else "0"
-
-
-def verify_tables(
-    bundle_path: Path | None = None,
-) -> list[str]:
-    """核对 bundle / cache / 导出 条数是否一致。返回报告行。"""
-    bundle_path = bundle_path or DEFAULT_BUNDLE
-    fresh = load_times_from_bundle(bundle_path)
+def verify_tables() -> list[str]:
+    """核对内置点击表并返回摘要。"""
+    fresh = _load_official()
     longest = max(fresh.items(), key=lambda kv: len(kv[1]))
     shortest = min(fresh.items(), key=lambda kv: len(kv[1]))
     lines = [
-        f"bundle 关卡数: {len(fresh)}",
+        f"内置关卡数: {len(fresh)}",
         f"总点击数: {sum(len(v) for v in fresh.values())}",
         f"最长: {longest[0]} n={len(longest[1])} end={longest[1][-1]:.4f}",
         f"最短: {shortest[0]} n={len(shortest[1])} end={shortest[1][-1]:.4f}",
-        "（脚本无条数硬限制；以下为 bundle 原文解析结果）",
         "— 各关 —",
     ]
     for name, times in fresh.items():
@@ -327,17 +159,6 @@ def verify_tables(
             f"  {name:<22} n={len(times):4d}  "
             f"[{times[0]:.4f} .. {times[-1]:.4f}]"
         )
-
-    if CACHE_PATH.is_file():
-        cache = json.loads(CACHE_PATH.read_text(encoding="utf-8"))
-        for name, times in fresh.items():
-            c = cache.get(name)
-            if c is None:
-                lines.append(f"  ! cache 缺: {name}")
-            elif len(c) != len(times):
-                lines.append(
-                    f"  ! cache 条数不一致 {name}: cache={len(c)} bundle={len(times)}"
-                )
     return lines
 
 
@@ -435,83 +256,7 @@ def diagnose_level_table(
     rew = sum(1 for i in range(1, len(times)) if times[i] + 1e-9 < times[i - 1])
     if rew:
         notes.append(f"原始表含 {rew} 处时间回绕（调度前会清洗）")
-    if check_audio:
-        audio_s = try_audio_length_seconds(name)
-        if audio_s is not None and audio_s > 5:
-            missing = audio_s - times[-1]
-            if missing > 8.0:
-                notes.append(
-                    f"⚠ 官方表末点 {times[-1]:.1f}s，音频约 {audio_s:.1f}s，"
-                    f"后半约缺 {missing:.0f}s 点击数据（非脚本截断；需 tables/ 补全）"
-                )
-            elif times[-1] > audio_s + 5:
-                notes.append(
-                    f"表末点 {times[-1]:.1f}s 晚于音频约 {audio_s:.1f}s（可能含尾奏后点）"
-                )
     return notes
-
-
-def try_audio_length_seconds(level_name: str) -> float | None:
-    """
-    尝试从 sounds_assets_level*.bundle 读 AudioClip 时长。
-    仅部分关有独立音频包；失败返回 None。
-    """
-    if not SOUNDS_DIR.is_dir():
-        return None
-    key = level_name.lower().replace(" ", "").replace("_", "")
-    # 常见命名：levelthirdanniversary / levelplains_remix
-    candidates = [
-        SOUNDS_DIR / f"sounds_assets_level{level_name.lower()}.bundle",
-        SOUNDS_DIR / f"sounds_assets_level{key}.bundle",
-    ]
-    # plains remix 等
-    if "remix" in key:
-        candidates.append(
-            SOUNDS_DIR / f"sounds_assets_level{key.replace('remix', '_remix')}.bundle"
-        )
-    for path in candidates:
-        if not path.is_file():
-            continue
-        try:
-            import UnityPy
-
-            env = UnityPy.load(str(path))
-            for obj in env.objects:
-                tn = getattr(obj.type, "name", None) or str(obj.type)
-                if tn != "AudioClip":
-                    continue
-                data = obj.read()
-                length = getattr(data, "m_Length", None)
-                if length is None:
-                    length = getattr(data, "length", None)
-                if length is not None and float(length) > 1.0:
-                    return float(length)
-        except Exception:
-            continue
-    # 模糊：文件名包含关卡名
-    try:
-        for path in SOUNDS_DIR.glob("sounds_assets_level*.bundle"):
-            stem = path.stem.lower().replace("sounds_assets_level", "").replace("_", "")
-            if key in stem or stem in key:
-                try:
-                    import UnityPy
-
-                    env = UnityPy.load(str(path))
-                    for obj in env.objects:
-                        tn = getattr(obj.type, "name", None) or str(obj.type)
-                        if tn != "AudioClip":
-                            continue
-                        data = obj.read()
-                        length = getattr(data, "m_Length", None) or getattr(
-                            data, "length", None
-                        )
-                        if length is not None and float(length) > 1.0:
-                            return float(length)
-                except Exception:
-                    continue
-    except Exception:
-        pass
-    return None
 
 
 def load_level_latencies() -> dict[str, float]:

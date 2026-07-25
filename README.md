@@ -1,10 +1,10 @@
 # 跳舞的线 · 点击辅助（DL Click Assist）
 
-从游戏资源里读出官方 / 场景引导的点击时间表，按表自动点击。  
+使用软件内置的点击时间表，按表自动点击。
 GUI（PySide6）支持选关、全局延迟、可视化改表，以及可选的「失败段落延迟」。
 
 > **定位**：学习 / 研究 / 自用辅助，**不是**稳定通关外挂。  
-> 官方表与场景引导本身有误差，热键与注入也有抖动——**精度有上限**，本仓库不再追求「必过」。
+> 点击表本身可能有误差，热键与注入也有抖动——**精度有上限**，本仓库不再追求「必过」。
 
 **许可**：MIT（见 [LICENSE](LICENSE)）
 
@@ -19,7 +19,7 @@ GUI（PySide6）支持选关、全局延迟、可视化改表，以及可选的�
 | 全局延迟 | 整关 ±ms，治整体抢拍/偏晚 |
 | 编辑表 | 时间轴拖拽 / 表格改点，写入 `level_overrides.json` |
 | 失败微调 | 默认**段落延迟**（不改表）；可撤销 |
-| 数据源合并 | 用户覆盖 > 场景 HintTap 引导 > LevelClickTimes |
+| 数据源合并 | 用户覆盖 > 内置官方点击表 |
 
 ---
 
@@ -27,19 +27,7 @@ GUI（PySide6）支持选关、全局延迟、可视化改表，以及可选的�
 
 - Windows（当前注入与热键按 Win 实现）
 - Python 3.10+（建议 3.11+）
-- 已安装 *Dancing Line*（Steam），本工具默认从游戏目录读 bundle
-
-```text
-建议目录布局（与 Steam 一致时零配置）：
-
-Dancing Line/
-  Dancing Line_Data/...
-  click_assist/          ← 本仓库
-    main.py
-    dl_assist/
-```
-
-若放在别的路径，需改 `dl_assist/paths.py` 里的 `GAME_DIR` / bundle 路径。
+- 软件无需读取或解包游戏安装目录
 
 ---
 
@@ -62,11 +50,7 @@ python main.py --level Beginning --latency 12
 python main.py --level 启程
 python main.py --list
 python main.py --verify
-python main.py --export
-python main.py --refresh-scene-guide
-python main.py --compare-guide
 python main.py --edit-notes --level 海盗
-python main.py --no-scene-guide          # 仅用 LevelClickTimes
 ```
 
 ---
@@ -77,8 +61,11 @@ python main.py --no-scene-guide          # 仅用 LevelClickTimes
 |----|------|
 | **F8** | 播放 / 暂停（未开始：Enter 开局并跟表；运行中暂停；暂停后再按继续） |
 | **F6** | 重置（停表并回到起点） |
+| **F7** | 下一拍及后续点击提前 5ms（可连续按） |
+| **F9** | 下一拍及后续点击延迟 5ms（可连续按） |
 
 暂停会冻结当前时间轴位置，方便对照；继续从同一时刻接着打。
+F7/F9 会立即修改主界面的全局延迟；即使下一拍正在等待，也会按新值重新计算。
 
 ---
 
@@ -149,14 +136,7 @@ CLI 可用中文或键：`--level 启程` / `--level Beginning`。
 ## 数据源优先级
 
 1. **`level_overrides.json`**（编辑器 / 改表微调）及兼容 `tables/*.txt`
-2. **场景引导 HintTap**（`level_scene_guide_cache.json`）
-3. **LevelClickTimes** 官方文本（bundle → `level_click_times_cache.json`）
-
-```powershell
-python main.py --refresh-scene-guide   # 重扫场景引导
-python main.py --export                # 导出官方表 → tables_official/
-python main.py --compare-guide         # 引导 vs 官方差异
-```
+2. **`tables_official/*.txt`**（随软件提供的内置点击表）
 
 ### 编辑点击表
 
@@ -197,8 +177,8 @@ python main.py --compare-guide         # 引导 vs 官方差异
 
 ## 已知上限（请先读）
 
-1. **官方 / 引导时间表并不完美**  
-   部分关回绕、偏短、与实机判定不一致；场景引导通常更好，仍非逐帧真理。
+1. **内置时间表并不完美**
+   部分关可能回绕、偏短或与实机判定不一致，并非逐帧真理。
 
 2. **热键与注入有抖动**  
    F8、Enter、空格经系统消息队列，毫秒级误差正常；`err≈0` ≠ 游戏内必准。
@@ -225,22 +205,19 @@ click_assist/
   dl_assist/
     gui.py                     # 主界面
     engine.py                  # 调度与点击
-    data.py                    # 加载 / 缓存 / 覆盖
+    data.py                    # 加载内置表 / 用户覆盖
     level_names.py             # 中英关卡名
     note_editor.py             # 表编辑器
     fail_tune.py / segments.py / tune.py
-    scene_guide.py             # 场景 HintTap
     clicker.py / input_backends.py / hotkeys.py
     ...
-  tables_official/             # --export 官方表参考
+  tables_official/             # 软件内置点击表
   tables/                      # 旧版 txt 覆盖（可选）
   level_*.json                 # 运行缓存 / 用户数据（见 .gitignore）
 ```
 
 用户本地生成、默认不提交：
 
-- `level_click_times_cache.json`
-- `level_scene_guide_cache.json`
 - `level_overrides.json`
 - `level_segment_latency.json`
 
@@ -267,7 +244,7 @@ click_assist/
 
 - 修正 `level_names.py` 中文译名  
 - 补全某关 overrides 时间表  
-- 改进场景 bundle 匹配、非 Steam 路径配置  
+- 补充和校准内置点击表
 - 文档与跨版本兼容
 
 请勿提交个人 `level_overrides.json` / 段落延迟等本地调参文件。

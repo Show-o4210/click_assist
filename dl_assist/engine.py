@@ -353,11 +353,8 @@ class Engine:
             while i < n and not self._stop.is_set():
                 with self._lock:
                     dry = self.s.dry_run
-                    # 每拍重算：段落延迟随 note 时间变化
-                    latency = self._effective_latency_s(sched[i])
                 group_t = sched[i]
-                deadline = wall0 + group_t + latency
-                if not self._wait_until(deadline):
+                if not self._wait_for_note(wall0, group_t):
                     break
                 first = True
                 while i < n and abs(sched[i] - group_t) < 1e-9:
@@ -389,18 +386,23 @@ class Engine:
         finally:
             timer_period(False)
 
-    def _wait_until(self, deadline: float) -> bool:
+    def _wait_for_note(self, wall0: float, note_t: float) -> bool:
+        """等待一拍；等待期间实时响应全局延迟微调。"""
         stop = self._stop
         while True:
             if stop.is_set():
                 return False
+            with self._lock:
+                latency = self._effective_latency_s(note_t)
+            deadline = wall0 + note_t + latency
             remain = deadline - time.perf_counter()
             if remain <= 0:
                 return True
+            # 长睡眠切成小片，保证热键修改后能很快重算下一拍。
             if remain > 0.040:
-                time.sleep(remain - 0.012)
+                time.sleep(min(remain - 0.012, 0.020))
             elif remain > 0.008:
-                time.sleep(remain - 0.002)
+                time.sleep(min(remain - 0.002, 0.004))
             elif remain > SPIN_REMAIN_S:
                 time.sleep(0.0004)
 

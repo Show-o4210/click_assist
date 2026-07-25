@@ -1,4 +1,4 @@
-"""全局热键：F8 播放/暂停，F6 重置。"""
+"""全局热键：F8 播放/暂停，F6 重置，F7/F9 实时微调。"""
 
 from __future__ import annotations
 
@@ -19,37 +19,43 @@ class HotkeyHub:
         *,
         on_toggle: Callable[[], None],
         on_reset: Callable[[], None],
+        on_earlier: Callable[[], None],
+        on_later: Callable[[], None],
     ) -> str:
         self.stop()
         try:
-            self._start_pynput(on_toggle, on_reset)
+            self._start_pynput(on_toggle, on_reset, on_earlier, on_later)
             self._mode = "pynput"
             return self._mode
         except Exception as e1:
             try:
-                self._start_keyboard(on_toggle, on_reset)
+                self._start_keyboard(on_toggle, on_reset, on_earlier, on_later)
                 self._mode = "keyboard"
                 return self._mode
             except Exception as e2:
                 raise RuntimeError(f"热键注册失败: pynput={e1}; keyboard={e2}") from e2
 
-    def _start_pynput(self, on_toggle, on_reset) -> None:
+    def _start_pynput(self, on_toggle, on_reset, on_earlier, on_later) -> None:
         from pynput import keyboard
 
         h = keyboard.GlobalHotKeys(
             {
                 "<f8>": on_toggle,
                 "<f6>": on_reset,
+                "<f7>": on_earlier,
+                "<f9>": on_later,
             }
         )
         h.start()
         self._impl = ("pynput", h)
 
-    def _start_keyboard(self, on_toggle, on_reset) -> None:
+    def _start_keyboard(self, on_toggle, on_reset, on_earlier, on_later) -> None:
         import keyboard as kb
 
         kb.add_hotkey("f8", on_toggle, suppress=False)
         kb.add_hotkey("f6", on_reset, suppress=False)
+        kb.add_hotkey("f7", on_earlier, suppress=False)
+        kb.add_hotkey("f9", on_later, suppress=False)
         self._impl = ("keyboard", kb)
 
     def stop(self) -> None:
